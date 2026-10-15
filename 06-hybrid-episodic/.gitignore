@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.venv/
+.venv312/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+.DS_Store
+.env
+
+# Local working notes. notes/API_CONTRACT.md transcribes the organizers'
+# own documentation, which is not ours to republish.
+notes/

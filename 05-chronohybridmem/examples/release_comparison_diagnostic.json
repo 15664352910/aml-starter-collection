@@ -1,0 +1,34 @@
+[
+  {
+    "case_id": "temporal-conflict",
+    "user_id": "diagnostic:temporal",
+    "session_id": "diagnostic:session",
+    "messages": [
+      {"role": "user", "timestamp": 200, "content": "Ravi's preferred drink is black tea."},
+      {"role": "user", "timestamp": 100, "content": "Ravi's preferred drink is hot coffee."}
+    ],
+    "query": "What is Ravi's current preferred drink?",
+    "expected_evidence": ["Ravi's preferred drink is black tea"]
+  },
+  {
+    "case_id": "ordinary-retrieval",
+    "user_id": "diagnostic:ordinary",
+    "session_id": "diagnostic:session",
+    "messages": [
+      {"role": "user", "timestamp": 100, "content": "Milo prefers jasmine tea after breakfast."}
+    ],
+    "query": "What tea does Milo prefer?",
+    "expected_evidence": ["Milo prefers jasmine tea"]
+  },
+  {
+    "case_id": "historical-conflict",
+    "user_id": "diagnostic:historical",
+    "session_id": "diagnostic:session",
+    "messages": [
+      {"role": "user", "timestamp": 100, "content": "Ravi's preferred drink is hot coffee."},
+      {"role": "user", "timestamp": 200, "content": "Ravi's preferred drink is black tea."}
+    ],
+    "query": "What did Ravi prefer before?",
+    "expected_evidence": ["Ravi's preferred drink is hot coffee"]
+  }
+]

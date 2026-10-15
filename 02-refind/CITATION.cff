@@ -1,0 +1,34 @@
+cff-version: 1.2.0
+message: "If you use ReFind, please cite the technical report below."
+title: "ReFind: A Human-Inspired Search Interface for Conversational Memory"
+type: software
+version: 0.1.0
+date-released: 2026-08-07
+repository-code: "https://github.com/imlrz/ReFind"
+license: MIT
+authors:
+  - family-names: Li
+    given-names: Ruizhe
+  - family-names: Xu
+    given-names: Benfeng
+  - family-names: Du
+    given-names: Mingxuan
+  - family-names: Zhang
+    given-names: Licheng
+  - family-names: Mao
+    given-names: Zhendong
+preferred-citation:
+  type: report
+  title: "When Your Agent Opens the Chat App: A Human-Inspired Search Interface for Conversational Memory"
+  year: 2026
+  authors:
+    - family-names: Li
+      given-names: Ruizhe
+    - family-names: Xu
+      given-names: Benfeng
+    - family-names: Du
+      given-names: Mingxuan
+    - family-names: Zhang
+      given-names: Licheng
+    - family-names: Mao
+      given-names: Zhendong

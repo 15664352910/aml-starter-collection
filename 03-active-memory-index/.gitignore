@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.env
+data/
+*.sqlite3
+*.sqlite3-*
+.DS_Store
+.venv/
+bench/out/
+bench/third_party/
+CLAUDE.md
+.env.academic

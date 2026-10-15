@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - run: pytest --cov=app --cov-report=term-missing
+
+  container-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t aml-memory-mvp:ci .
+      - run: docker run -d --name aml-memory -p 8000:8000 -e AML_LLM_MODE=off aml-memory-mvp:ci
+      - name: Wait for health
+        run: |
+          for attempt in $(seq 1 30); do
+            if python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs aml-memory
+          exit 1
+      - run: python scripts/smoke.py
+

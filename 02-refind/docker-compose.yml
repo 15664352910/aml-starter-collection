@@ -1,0 +1,15 @@
+services:
+  refind:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      RETRIEVAL_MODE: ${RETRIEVAL_MODE:-agent}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://openrouter.ai/api/v1}
+      LLM_MODEL: ${LLM_MODEL:-openai/gpt-4o-mini}
+    volumes:
+      - refind-data:/data
+
+volumes:
+  refind-data:

@@ -1,0 +1,15 @@
+services:
+  memory-api:
+    build: .
+    image: vanilla-rag-memory:0.4.0
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./artifacts:/app/artifacts
+      - huggingface-cache:/root/.cache/huggingface
+
+volumes:
+  huggingface-cache:

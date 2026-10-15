@@ -1,0 +1,465 @@
+# LongMemEval-S temporal-reasoning — baseline, and the falsification of H1
+
+Run 2026-08-19. Store `lme-t`: 133 temporal-reasoning instances, 6,392 `/add`
+calls, 6,041 extraction calls, 0 failures. Shipped configuration
+(`RAW_FIRST=1`, `WINDOW_RADIUS=1`, `AGENTIC_SEARCH=0`, `RETURN_LIMIT=100`).
+Bench container, bench volume, bench port; production untouched.
+
+Pre-registration and decision rule: `lme_temporal_preregistration.md`. Read it
+first — it contains the hypothesis this file kills.
+
+## H1 was wrong
+
+The pre-registration predicted a *completeness* deficit: `turn@k` high,
+`all-chunks` much lower, because 85% of these questions need evidence from two
+or more sessions. What the instrument says:
+
+| | base | base2 (identical config, second run) |
+|---|---:|---:|
+| `turn@k` — evidence turns retrieved | 0.947 | 0.947 |
+| `chunk@k` — evidence chunks retrieved | **1.000** | **1.000** |
+| `all-turns` — every evidence turn, every question | 0.924 | 0.924 |
+| `all-chunks` — every evidence chunk, every question | **1.000** | **1.000** |
+| `all-sess` — every evidence session | 1.000 | 1.000 |
+
+**Retrieval is saturated.** All 133 questions get all of their evidence. There
+is no multi-target retrieval deficit to fix, and no retrieval arm can improve a
+number that is already 1.000.
+
+The direction is also inverted from the prediction. Multi-evidence questions
+are the *easiest* to retrieve, not the hardest:
+
+| subset | n | `turn@k` |
+|---|---:|---:|
+| single-evidence | 39 | 0.846 |
+| 2 evidence turns | 74 | **1.000** |
+| >=3 evidence turns | 19 | 0.946 |
+
+The structural argument for H1 — that LoCoMo is 73% single-evidence and
+LongMemEval is 69% multi-evidence, so our knobs were tuned on the wrong task —
+described the two datasets correctly. The inference from it, that the
+difference would show up as missing evidence, did not survive contact with the
+measurement. A lexical-overlap check run before the result (worst evidence turn
+shares 0.222 of the question's content words against the best turn's 0.375, a
+ratio of 0.667, with only 13% of questions having a near-invisible second
+piece) already pointed this way and was recorded as weakening H1.
+
+## Where the loss actually is
+
+| | base | base2 |
+|---|---:|---:|
+| end-to-end accuracy, `gpt-4o-mini`, platform prompts | 0.429 (57/133) | 0.444 (59/133) |
+
+**56% of questions are answered wrong while holding 100% of the evidence.** The
+whole of this axis's loss is downstream of retrieval.
+
+Two failures from the pilot, both with complete evidence:
+
+| question | gold | generated |
+|---|---|---|
+| days between the Sunday mass and the Ash Wednesday service | 30 days (31 also accepted) | 29 days |
+| which show did I start watching first | 'Game of Thrones' | 'The Crown' |
+
+Arithmetic and ordering over ~77,000 characters of correctly retrieved context.
+
+## The noise floor, measured before any arm is judged
+
+base and base2 are the same configuration over the same store. Retrieval is
+effectively deterministic — every metric above is identical to three decimals,
+and the returned text differs by 6 characters out of 77,263. The end-to-end
+layer is not:
+
+* net difference: 2 questions (57 vs 59), 1.5 pp
+* **discordant pairs: 8 of 133 (6.0%)** — same question, same retrieved set,
+  opposite verdict
+
+The net difference understates the noise by a factor of four. **An arm must
+move substantially more than 8 questions in one direction to be readable at
+this n; a difference under ~6 pp is not interpretable.** This supersedes the
+looser wording in the pre-registration, which asked only that an arm beat "the
+replicate noise" without fixing a number to it.
+
+## The largest identifiable loss is not ours to fix
+
+42 of these questions are anchored to "now" ("how many weeks ago…", "how many
+months since…"). No published pipeline in the platform's evaluation repository
+conveys the question date to the answer model, and the answer prompt has no
+slot for one.
+
+| subset | n | base | base2 |
+|---|---:|---:|---:|
+| now-anchored | 49 | 0.286 | 0.286 |
+| not now-anchored | 84 | 0.512 | 0.536 |
+
+Not zero — the model sometimes reaches the answer through relations between
+memories rather than through the calendar — but 22 pp below the rest. Bringing
+this subset up to the rest of the set is worth about +8.6 pp; solving it
+outright is worth about +26 pp.
+
+Inferring "now" from the store does not work. `question_date` minus the newest
+haystack date has a median of 3.5 days, p75 of 17 days and a maximum of 188
+days; only 60 of 133 fall within a day. A system that guessed "now" from its
+most recent memory would miscount most of these questions.
+
+## Returned-set size against its budget
+
+Scored on the same retrieval, truncated to a prefix:
+
+| returned | `turn@k` | `chunk@k` | `all-chunks` | characters |
+|---:|---:|---:|---:|---:|
+| 10 | 0.627 | 0.838 | 0.750 | 12,909 |
+| 20 | 0.797 | 0.901 | 0.856 | 25,176 |
+| 40 | 0.902 | 0.959 | 0.932 | 48,527 |
+| 60 | 0.928 | 0.974 | 0.962 | 69,261 |
+| 100 | 0.947 | 1.000 | 1.000 | 77,263 |
+
+`RETURN_LIMIT=100` was chosen by sweeping LoCoMo. On this unrelated instrument
+100 is exactly where coverage saturates, which is an independent check on that
+decision rather than a restatement of it.
+
+Shortening the context is a narrower option than it looks. The last 40 items
+cost 11% more characters and buy the final 3.8 points of coverage, because
+raw-first puts the long verbatim turns at the head and the short extracted
+facts at the tail — items 61-100 average about 200 characters each.
+
+## Consequences
+
+* Every arm aimed at retrieval coverage — the agentic second round, query
+  decomposition, multi-vector retrieval — has nothing to gain here. They were
+  the plan; the plan was wrong.
+* The arms worth running on this axis are reader-side: ordering (`chrono`),
+  and whether the reader knowing the date recovers the now-anchored subset.
+* The neighbour window and `RETURN_LIMIT` are both vindicated on an instrument
+  they were not tuned on.
+
+---
+
+# Arms
+
+All arms read the same store. `qdate-reader` reuses `base`'s retrieval file
+byte for byte and changes only what the answer model is told, so it isolates
+the reader from any retrieval difference.
+
+| arm | accuracy | vs base | discordant vs base |
+|---|---:|---:|---:|
+| base | 0.429 (57/133) | — | — |
+| base2 — identical config | 0.444 (59/133) | +2 | 8 |
+| qdate-reader — reader told the current date | 0.436 (58/133) | +1 | 31 |
+| chrono — each block oldest-first | 0.444 (59/133) | +2 | 28 |
+
+Every arm lands inside the noise floor. Neither is worth shipping on this
+evidence. **But the net figure hides the largest effect measured in this
+cycle**, and reporting these three numbers alone would have been wrong.
+
+## The question date: +26.5 pp where it is needed, -14.3 pp where it is not
+
+| subset | n | base | base2 | qdate-reader |
+|---|---:|---:|---:|---:|
+| now-anchored | 49 | 0.286 | 0.286 | **0.551** |
+| the rest | 84 | 0.512 | 0.536 | **0.369** |
+
+15 discordant pairs on the 49-question subset, against a same-config floor of
+2 on that same subset. This is an effect, not jitter, and the two halves cancel
+to nothing.
+
+### What the damage is not
+
+It was first attributed here to the judge's rule against converting relative
+expressions into absolute ones. **That explanation was checked and is wrong.**
+Of the 15 questions that went CORRECT to WRONG, only 1 gained an absolute date
+it did not have before, and only 5 have a gold answer that is a bare relative
+expression.
+
+### What the damage is
+
+The arithmetic itself degrades:
+
+| question | gold | base | qdate-reader |
+|---|---|---|---|
+| days between finishing the book and the book club | 18 days | **18 days** | 14 days |
+| months before the anniversary that Rachel got engaged | 2 | **2 months** | 1 month |
+| days before buying the iPhone that the Holiday Market was attended | 7 days | **a week** | 15 days |
+| which happened first, meeting Rachel or the pride parade | meeting Rachel | **meeting Rachel (Apr 10 before May 1)** | the pride parade |
+
+These are memory-to-memory questions with no bearing on the present. Supplying
+a current date adds a third anchor to a two-anchor computation and the model
+tries to use it. The last row loses an ordering it had right.
+
+This generalises past this arm. The reader already sees 100 timestamped
+memories across 77,000 characters. If one additional date can derail a
+subtraction between two others, the number of competing anchors in the returned
+set is itself a variable worth measuring — which makes the shorter prefixes,
+dismissed above as a poor character-for-coverage trade, worth an end-to-end
+test they had no motivation for before.
+
+### What the gain depends on
+
+The dataset's `question_date` precedes the newest memory we return in 56 of 133
+instances, because the haystack carries sessions that postdate the question.
+The gain is concentrated where it does not:
+
+| subset | n | base | qdate-reader |
+|---|---:|---:|---:|
+| now-anchored, stated date at or after the newest returned memory | 37 | 0.297 | **0.622** |
+| now-anchored, stated date precedes a returned memory | 12 | 0.250 | 0.333 |
+| not now-anchored, date consistent | 40 | 0.525 | 0.375 |
+| not now-anchored, date inconsistent | 44 | 0.500 | 0.364 |
+
+The damage is flat across both date conditions (-0.150 and -0.136), so it is
+not caused by an inconsistent date. The gain is not: +0.324 when the date is
+consistent against +0.083 when it is not.
+
+So the date is worth roughly +26 pp on a third of this axis and cannot be
+applied indiscriminately. It is also not ours to supply: no pipeline in the
+platform's public evaluation repository conveys the question date, the answer
+prompt has no slot for one, and inferring it from the newest stored memory is
+wrong by a median of 3.5 days and a p75 of 17. **This is a contract question,
+not an engineering one.**
+
+## Chronological ordering does nothing, including where it should
+
+| subset | n | base | base2 | chrono |
+|---|---:|---:|---:|---:|
+| questions containing an ordering word (first, before, after, order, earlier, later) | 64 | 0.516 | 0.500 | **0.516** |
+| the rest | 69 | 0.348 | 0.391 | 0.377 |
+
+Flat to three decimals on the subset built to favour it, while flipping 28
+verdicts across the set against a floor of 8 — churn without direction. The
+arm was added after seeing two pilot failures, was declared as post-hoc in the
+pre-registration, and is now closed.
+
+Note which subset is hard. Ordering questions are the *easier* half (0.516
+against 0.348). What fails is duration arithmetic anchored to the present.
+
+## Where this leaves the axis
+
+Of 133 questions with complete evidence, 76 are answered wrong. About 35 of
+those are now-anchored, and roughly 13 of them are recoverable by a date the
+contract does not carry. The rest is `gpt-4o-mini` doing calendar arithmetic
+over 77,000 characters, which no retrieval change reaches.
+
+That the entire open leaderboard sits at 18-24.6 on this axis while one
+commercial entry reports 60.0 is consistent with the date being conveyed on
+some integration path we cannot see from the public repository. That is a
+hypothesis this instrument cannot test, not a finding.
+
+---
+
+# Context volume is not a variable
+
+The qdate result suggested a generalisation: if one spurious date can derail a
+subtraction between two others, perhaps the hundred timestamped memories we
+already return are themselves interference. **Tested, and false.**
+
+Scored on the same retrieval, truncated before the answer stage:
+
+| returned | complete evidence | accuracy | **accuracy given complete evidence** | characters |
+|---:|---:|---:|---:|---:|
+| 40 | 0.932 | 0.402 | **0.431** | 48,527 |
+| 60 | 0.962 | 0.417 | **0.433** | 69,261 |
+| 100 | 1.000 | 0.432 | **0.432** | 77,263 |
+
+The context nearly doubles and the conditional accuracy does not move in the
+third decimal. Returned-set size decides only whether the evidence is present;
+once it is, the reader succeeds at 43.2% regardless of how much text surrounds
+it. The qdate damage came from putting a false anchor in the question's frame,
+not from the volume of anchors in the memories, and the generalisation drawn
+from it here was wrong.
+
+# The axis, closed
+
+1. At `top_k=100` every one of the 133 questions receives all of its evidence.
+2. Given that evidence, `gpt-4o-mini` answers 43.2% correctly.
+3. That rate is invariant to how much context is returned.
+4. The only intervention measured to move it is the question date: +32.4 pp on
+   the 37 questions where the date is consistent with the memories, at a cost
+   of -14 pp everywhere else, and the contract does not carry it.
+
+Nothing on the memory system's side of the interface changes this number. The
+arms that were planned for September — a second retrieval round, query
+decomposition, multi-vector retrieval, write-time relative-date normalisation,
+fact versioning — all address a bottleneck that this instrument says does not
+exist on this axis.
+
+## What does not transfer
+
+This instrument reads 0.432 where the platform's axis C reads 18.35, and the
+LoCoMo harness reads ~0.5 on its own temporal category. **Both local
+instruments sit roughly 2.5x above the platform.** Axis C aggregates three
+leaves across an undisclosed mix of datasets under an undisclosed judge, so
+what generalises from this file is the *ordering* of arms and the *location* of
+the bottleneck, not the number. Whether axis C as a whole is retrieval-saturated
+the way LongMemEval temporal-reasoning is remains untested.
+
+## What to measure next
+
+The same harness, the same store-building cost (~6,400 Add calls, about two
+hours), pointed at a different `question_type`. The question for each axis is
+the one this file answered for C: is the loss upstream of the interface, where
+we can reach it, or downstream, where we cannot?
+
+| subset | n | axis it feeds | our score |
+|---|---:|---|---:|
+| `multi-session` | 133 | B, relational and multi-hop | 45.04 |
+| `knowledge-update` | 78 | D, memory governance | 37.95 (first on the board) |
+
+`multi-session` first: B is the second-weakest axis, all 133 of its questions
+need two or more sessions, and if *its* loss is retrieval-side then that is
+where September belongs.
+
+---
+
+# Computing the arithmetic instead of asking for it
+
+The failures above are subtractions the answer model performs in its head over
+calendar dates, and gets wrong: 30 days returned as 29, two months as one,
+eight weeks as three. The dates are stored in ISO form, so the subtraction can
+be done exactly in code and handed over as integers. `AMI_DAY_INDEX` numbered
+each returned memory by the day it falls on, counting from the earliest memory
+in the returned set, rendered beside the timestamp:
+
+    [2023-03-15 08:09 · day 33] I: ...
+
+Retrieval is untouched — `all-chunks` stays at 1.000 — and 12,317 rendered day
+numbers were audited against their own dates with **zero inconsistencies**.
+
+| | base | base2 | day index |
+|---|---:|---:|---:|
+| accuracy | 0.429 (57) | 0.444 (59) | 0.451 (60) |
+| discordant vs base | — | 8 | 11 |
+
+Inside the noise floor, and **not shipped**. But the two sides of it are not
+noise, and they point in opposite directions.
+
+## What it fixed was exactly what it was built to fix
+
+| question | gold | base | day index |
+|---|---|---|---|
+| days between the Sunday mass and the Ash Wednesday service | 30 (31 accepted) | 29 | **31** |
+| days between buying the gift and the graduation ceremony | 7 (8 accepted) | 21 | **7** |
+
+## What it broke was an entire class
+
+Three of the four regressions are "which happened first", and all three flipped
+to the wrong order. The reason is visible in the returned text:
+
+    [2023-05-09 12:13 · day 1] I: ... especially after attending the pride parade ...
+    [2023-05-09 12:14 · day 1] Assistant: ... attending the pride parade on May 1st ...
+    [2023-05-09 08:01 · day 1] I: ... my mentor, Rachel, who I had a meeting with on April 10th ...
+
+**The index numbers the utterance, not the event.** The user recounted both
+events on one day, so every memory carries the same `day 1` while the dates
+that actually order them — April 10th and May 1st — sit in the prose. Without
+the index the model read those dates and answered correctly. With it, it
+believed the number.
+
+TIDE-Mem's extraction prompt draws the distinction this missed: *"Use message
+timestamps as utterance times and resolve relative dates only when
+unambiguous."* An event-time index would have to come from the extraction step,
+not from the envelope, and that is a different mechanism from this one.
+
+## The pattern across two arms
+
+| arm | what it made salient | result |
+|---|---|---|
+| `qdate-reader` | a current date in the question frame | +26.5 pp where the present is needed, **-14.3 pp everywhere else** |
+| `dayidx` | a numeric day beside every timestamp | fixes genuine subtractions, **breaks ordering questions whose dates are in the prose** |
+
+Twice now, making one time anchor more prominent has cost more than it bought
+on the questions whose real anchors are inside the text. The model transfers
+its trust to whatever is formatted most authoritatively. That is a constraint
+on this whole family of interventions, not two unrelated regressions.
+
+---
+
+# Reading the time, computing the arithmetic
+
+The day-index arm failed because a regular expression on the envelope can only
+see the utterance date. Finding a time in free text is reading — "the day of my
+graduation" contains no digits — so `AMI_EVENT_DATES` asks `gpt-4o-mini` when
+each returned memory's event actually happened, given the date it was said, and
+the day numbers are then computed in code from what comes back.
+
+Only memories the reader could date are touched; one it declines is returned
+exactly as before. That is the correction to the previous arm, which numbered
+everything and so put the same authoritative `day 1` on two memories describing
+events a month apart.
+
+    [said 2023-05-09 08:01 · happened 2023-04-10 · day 1] I: my mentor Rachel, who I met on April 10th
+
+## Four runs of each arm
+
+| | runs | mean | range |
+|---|---|---:|---|
+| base | 57, 58, 59, 60 | 58.50 | [57, 60] |
+| **event dates** | 62, 63, 65, 67 | **64.25** | [62, 67] |
+
+Complete separation — the worst run of one arm beats the best run of the other.
+Exact permutation test, 4 against 4, two-sided: **p = 0.029**.
+
+## Where the gain lands, and where it does not
+
+| subset | n | base (four runs) | event dates (four runs) | difference |
+|---|---:|---|---|---:|
+| needs a current date | 49 | 14, 14, 15, 15 | 14, 14, 14, 16 | **+0.00** |
+| does not | 84 | 43, 43, 45, 45 | 48, 49, 51, 51 | **+5.75** |
+
+Every question of the gain is in the subset the mechanism addresses, and the
+subset it cannot help — the questions that need a present this system is not
+given — is unmoved to two decimal places over eight runs. An intervention that
+moves only its target population is a different kind of evidence from one that
+moves a total.
+
+## Why the per-question test disagrees, and which to believe
+
+Scoring each question by whether three of four runs got it right gives 7 fixed
+against 5 broken, sign test p = 0.77. That is not a contradiction; it is
+binarisation throwing the signal away. The effect is a shift in probability, not
+a set of deterministic flips:
+
+| change in correct-run count | -4 | -2 | -1 | 0 | +1 | +2 | +3 | +4 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| questions | 1 | 3 | 3 | **110** | 6 | 3 | 4 | 3 |
+
+110 of 133 questions never move. Sixteen improve, seven worsen. A Wilcoxon
+signed-rank test over the 23 that moved, which does not discard the magnitudes:
+**z = 1.95, p = 0.052**.
+
+Two tests that use the data differently agree in direction and land either side
+of 0.05. Read together with the specificity above, this is the one arm measured
+in this cycle that survived its pre-registered criteria.
+
+## What it is not
+
++4.3 points on one question type of one dataset under a local judge, with 110
+of 133 questions untouched. This instrument reads about 2.5x the platform's
+axis C, so nothing here converts to a leaderboard number. It is a real, modest
+effect whose direction should transfer; the magnitude should not be quoted.
+
+## Two failures it fixed, in its own words
+
+| question | gold | base | event dates |
+|---|---|---|---|
+| days between the Sunday mass and the Ash Wednesday service | 30 | 29 | **30** |
+| days taken to finish 'The Nightingale' | 21 | **1 day** | **21 days** |
+
+Three of the four ordering questions the day-index arm broke are recovered.
+
+## Where it belongs, which is not where it was measured
+
+Measured at search time to avoid a re-ingest, and it must not ship there. Each
+search spends about five extra LLM calls, the retrieval stage goes from seconds
+to 2m45s for 133 questions, and a formal run of 4,871 searches would add roughly
+24,000 calls whose serial tail runs at the Cloudflare edge's ~100-second cut.
+Worse, a memory returned by twenty questions is dated twenty times.
+
+Only 10.1% of returned memories receive a date at all, though 68.2% of those
+differ from the utterance date — the reader is doing real work on a small
+fraction of a large payload.
+
+**Add is where this belongs, and it is free there.** Every chunk already costs
+one extraction call; asking that same call for event dates adds no calls at all,
+prices the work once instead of once per retrieval, and removes the latency
+question entirely. It needs a column on `items`, a longer extraction prompt, and
+a re-ingest — and it is a different mechanism from the one measured here, so it
+has to be measured again rather than assumed to carry the same +4.3.

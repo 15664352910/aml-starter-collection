@@ -1,0 +1,157 @@
+# Pre-registration — a fact brings its own evidence
+
+Written 2026-09-21 before the switch was implemented. Read this before any number.
+
+## The question this arm exists to answer
+
+The cross-encoder arm failed in a specific, diagnosed way. It scored *does this
+passage answer the question*, and on a multi-evidence question **no passage
+answers it alone**, so it demoted all of them: LoCoMo cat1 complete@100 fell
+0.559 → 0.456, and 0.647 → 0.441 with the neighbour window off, while recall@1
+doubled (`locomo_rerank.md`). We checked and killed both easy explanations — not
+a slot tax (distinct source chunks 22.2 → 22.2), not a bias against facts.
+
+An extracted fact does not have that problem. It is a standalone claim, so it
+scores *well* under exactly the kind of relevance model that demotes the turns it
+was extracted from. The claim under test is that this asymmetry is usable:
+
+> Rank the facts. Let a selected fact pull its evidence turns in behind it.
+
+If that works, a multi-evidence retrieval problem becomes single-target retrieval
+plus a deterministic expansion, and the mechanism is structural rather than a
+nudge to how salient something looks. That matters because the five interventions
+before this one all moved salience, and none of their outcomes was predictable
+from any measurable property of the change.
+
+## What actually changes
+
+`select()` already does this for verbatim turns: a taken raw pulls the turns
+either side of it within its Add chunk (`neighbours`, WINDOW_RADIUS=1). A taken
+fact pulls nothing. This arm makes the symmetric move.
+
+A fact's id is `{digest}-f{n}`; its chunk's turns are `{digest}-r{0..m}`. The
+expansion takes the **`AMI_FACT_EVIDENCE` highest-scoring raws of that digest**,
+by the embedding scores already computed for the query — so "of my chunk's turns,
+the most relevant ones", at no extra cost. Pulled turns inherit the fact's score,
+exactly as neighbours inherit theirs, so they land adjacent in relevance order.
+`take()` is unchanged, so dedup, the return limit and the char budget all still
+apply, and the expansion can only spend slots that the limit already allows.
+
+**This is chunk-level, not claim-level.** It pulls the turns of the Add call the
+fact came from, not the specific turns that support it — that would need the
+extractor to emit turn indices, which lengthens the extraction prompt, which we
+have measured moves the *base* by +1.75 (`lme_event_dates_add.md`). Arm 0 is
+deliberately the version that costs no prompt change and therefore carries no
+confound. If expansion does nothing here, the precise version is not worth buying.
+
+## Store
+
+**None is built.** This is a search-time change over stores that already exist:
+`lme-t` (LongMemEval-S temporal-reasoning, 133 questions, 6,392 Add calls) and
+the LoCoMo stores. No Add calls, no `gpt-4o-mini` spend, no ingest time. The
+arm is a re-run of retrieval and answering only.
+
+## Read before the arm
+
+1. **Does it fire, and what does it cost?** Share of returned sets where a fact
+   pulled at least one turn, and mean turns pulled. An arm that never fires is
+   not a negative result about the mechanism.
+2. **The slot tax, measured the way `locomo_rerank.md` measured it.** Distinct
+   source chunks per returned set, and the raw/fact mix. The neighbour window
+   trades breadth of sources for local context; this trades it again, on top.
+   Base is 22.2 distinct chunks and 54.4 raw turns.
+3. **Base parity is free here** — the store is the same store, so any difference
+   is the switch and nothing else. This is the first arm in the project where
+   that is true.
+
+**Note added 2026-09-21, after implementation, before the arm.** The gate is
+unchanged; this sharpens read 1 and lowers what should be expected of it.
+
+Trying to demonstrate the expansion over HTTP on a hand-seeded store failed
+three times in the same way: **the fact kept ranking below the verbatim turns**,
+including turns of other chunks that merely share the question's wording. At the
+top_k where the fact was inside the returned set, its own turns were immediately
+behind it anyway; where distractors were strong enough to push its turns out, they
+pushed the fact out too. The toy store is a poor instrument — its scores were
+hand-tuned by rewording — so this is not evidence about the real one. But it
+names a precondition the pre-registration left implicit:
+
+> The expansion can only fire when a fact outranks turns. On LoCoMo the base
+> returns 54.4 verbatim turns of ~100, so if facts routinely sit below turns,
+> arm 0 rarely fires and its ceiling is low regardless of whether the mechanism
+> is sound.
+
+Read 1 therefore reports the **rank distribution of facts in the base returned
+set** before anything else. A low firing rate is a finding about the ranker, not
+a refutation of the mechanism, and it would point at a different arm — one that
+lifts facts so they can carry their evidence — rather than at abandoning it.
+`AMI_RAW_FIRST` already orders turns ahead of facts *after* selection; whether
+facts also lose the *selection* is not something this project has measured.
+
+## Amendment 2026-09-22 — the gate passed and the veto fired; one more measurement
+
+Recorded in `lme_fact_evidence.md`: LongMemEval end-to-end +5.75 (p=0.029),
+LoCoMo cat1 complete@100 −5.3pp. Per the rule below the arm does not ship.
+The veto's premise — that `complete@k` tracks accuracy — has now inverted
+bucket by bucket, so the conflict is between instruments, not within the data.
+
+**Registered before running:** LoCoMo **end to end** on the rebuilt `all10v2`
+store, `base` and `factev`, two replicates each (retrieve, answer, judge; prefix
+100; n=1540). Decision:
+
+* Paired comparison over questions, mean of two replicates per arm. Sign test
+  on discordant questions, two-sided. The known noise floor on this instrument
+  is ~6pp of discordant pairs (`bench/README.md`), so a difference inside that
+  is read as "no difference", not as a win.
+* **`factev` not significantly worse than `base`** (p ≥ 0.05, or any gain) →
+  the coverage veto measured the wrong thing. The arm is then re-registered
+  under a new gate — *end to end on both corpora* — and ships as
+  `AMI_FACT_EVIDENCE=2` if it clears that gate, which these same numbers would
+  constitute.
+* **`factev` significantly worse** (p < 0.05, negative) → the veto caught a real
+  cross-corpus failure. The arm is closed and the `complete@k` veto stands as
+  the instrument that caught it.
+
+The original rule is not being overturned: it said the arm does not ship on the
+readings it had. It does not. This adds a reading it did not have.
+
+## Decision rule
+
+Arms differ only in `AMI_FACT_EVIDENCE`: base 0, arm 2. Everything else as
+shipped, including `AMI_RAW_FIRST=1` and `AMI_WINDOW_RADIUS=1`.
+
+* **Primary gate, end to end:** LongMemEval-S temporal-reasoning, four replicates
+  each, prefix 100, local judge, permutation 4v4 two-sided **p < 0.05** in the
+  positive direction against the base's 57/58/59/60 (mean 58.50).
+* **Secondary, and a veto:** LoCoMo cat1 **complete@100** must not fall below
+  base. This is the metric the cross-encoder destroyed, and it is the one the
+  mechanism claims to fix; a gain end-to-end while completeness falls means the
+  stated mechanism is not what produced the gain, and the arm does not ship on
+  that reading.
+* Wilcoxon over the movers is reported alongside, not gated on.
+* **Never gated on recall@k** (`bench/README.md`).
+
+## Prediction
+
+Completeness rises and breadth falls: complete@100 up on cat1, distinct source
+chunks down from 22.2, because pulled turns spend slots that would otherwise
+have gone to other chunks. End to end I expect a small positive, under +4.
+
+Recorded with the standing caveat that this project has made two written
+predictions about ranking changes and **both were wrong**. The prediction is here
+to be scored, not to be believed.
+
+## If it passes
+
+It ships as `AMI_FACT_EVIDENCE=2`, a search-time switch with no Add-side cost and
+no store migration — so it can be turned on and off against a built store, which
+none of the event-date arms could. It preserves the project invariant: the
+expansion changes *which* stored turns are returned and in what order, never the
+text of any of them.
+
+## If it fails
+
+It closes arm 1 (claim-level evidence links) before that arm is built, since arm
+1 buys precision on an expansion that did not help when it was free. It does not
+close arm 2 (supersession ordering on a canonical fact key), which is a different
+mechanism — ordering versions of one claim, not attaching evidence to a claim.

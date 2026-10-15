@@ -1,0 +1,16 @@
+.env
+store/
+store_smoke/
+logs/
+__pycache__/
+*.pyc
+.Python
+.venv/
+venv/
+*.tar
+!hybrid-memory-1.0.0.tar
+*.zip
+.DS_Store
+# Keep TiMem locally, never publish
+timem_adapter/
+timem-adapter-*.tar

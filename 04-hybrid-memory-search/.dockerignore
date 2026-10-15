@@ -1,0 +1,17 @@
+.git
+.gitignore
+store
+store_smoke
+**/__pycache__
+*.pyc
+*.pyo
+.env
+*.md
+!DEPLOY.md
+data
+agent-transcripts
+.cursor
+mcps
+terminals
+*.npz
+*.zip

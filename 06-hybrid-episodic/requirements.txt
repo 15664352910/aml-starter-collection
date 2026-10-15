@@ -1,0 +1,12 @@
+# Submitted configuration: BM25 lexical channel + local bge-small dense channel,
+# fused with RRF. No API key, no network at runtime, fully deterministic.
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+numpy==2.2.1
+
+# Local sentence encoder for the dense channel. CPU-only torch — this service
+# never sees a GPU. Install with:
+#   pip install --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt
+sentence-transformers==3.3.1
+torch==2.5.1

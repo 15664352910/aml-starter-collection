@@ -1,0 +1,101 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    # 3.12 matches the Dockerfile base image, so CI exercises the same wheels the
+    # platform's build will resolve.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt
+          pip install pytest httpx
+          # Stubbed in tests/test_fusion.py, but the import must resolve.
+          pip install -r requirements-mem0.txt
+
+      - name: Contract, concurrency and fusion tests
+        run: python -m pytest tests/ -q
+
+      - name: Concurrency suite, repeated
+        # Races pass by luck once; ten clean runs is the actual signal.
+        run: |
+          for i in $(seq 1 10); do
+            python -m pytest tests/test_concurrency.py -q || exit 1
+          done
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the submitted image
+        run: docker build -t agent-memory-challenge .
+
+      - name: Start it
+        run: |
+          docker run -d --name amc -p 8000:8000 agent-memory-challenge
+          for i in $(seq 1 60); do
+            curl -sf http://127.0.0.1:8000/health >/dev/null && break
+            sleep 2
+          done
+          curl -sf http://127.0.0.1:8000/health
+
+      - name: End-to-end smoke against the container
+        # The same invariants the platform enforces, against the real artifact.
+        run: python scripts/smoke_local.py --base-url http://127.0.0.1:8000
+
+      - name: Restart with authentication
+        run: |
+          docker rm -f amc
+          docker run -d --name amc -p 8000:8000 -e API_KEY=ci-test-key agent-memory-challenge
+          for i in $(seq 1 60); do
+            curl -sf http://127.0.0.1:8000/health >/dev/null && break
+            sleep 2
+          done
+
+      - name: Every accepted auth scheme must satisfy the same secret
+        # The platform picks the scheme on this route, and a mismatch is a 401 —
+        # which it does not retry. So all of them have to work.
+        run: |
+          for scheme in bearer token x-api-key raw; do
+            echo "--- $scheme"
+            python scripts/smoke_local.py \
+              --base-url http://127.0.0.1:8000 \
+              --api-key ci-test-key \
+              --auth-scheme "$scheme" | tail -1
+          done
+
+      - name: Bad and missing credentials must be rejected
+        run: |
+          body='{"request_id":"x","messages":[{"role":"user","content":"t"}],"user_id":"u","session_id":"s"}'
+          for args in "" "-H Authorization:Bearer_wrong"; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8000/add \
+              -H 'Content-Type: application/json' $args -d "$body")
+            echo "credentials [$args] -> $code"
+            [ "$code" = "401" ] || { echo "expected 401"; exit 1; }
+          done
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/health)
+          echo "/health -> $code"
+          [ "$code" = "200" ] || { echo "/health must stay unauthenticated"; exit 1; }
+
+      - name: Logs on failure
+        if: failure()
+        run: docker logs amc
+
+      - name: Stop
+        if: always()
+        run: docker rm -f amc || true

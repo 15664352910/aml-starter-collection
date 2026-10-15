@@ -1,0 +1,14 @@
+# Optional extraction channel — NOT ENABLED IN THIS SUBMISSION.
+#
+# src/mem0_backend.py adds an LLM fact-extraction channel on top of the submitted
+# retrieval core, fused by the same RRF layer. It is implemented and unit-tested
+# (tests/test_fusion.py, with mem0 stubbed) but has not been validated end-to-end
+# against a live gpt-4o-mini endpoint, so it ships disabled: MEM0_ENABLED=false.
+#
+# Enabling it requires an OPENAI_API_KEY and changes the declared model set — see
+# the model-disclosure table in README.md.
+#
+#   pip install -r requirements.txt -r requirements-mem0.txt
+#   MEM0_ENABLED=true OPENAI_API_KEY=sk-... uvicorn src.app:app
+mem0ai==2.0.17
+faiss-cpu==1.15.0

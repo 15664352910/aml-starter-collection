@@ -1,0 +1,33 @@
+name: Verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  core-verification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements-test.txt
+      - name: Run core tests
+        run: python -m pytest
+      - name: Compile Python sources
+        run: python -m compileall -q app tests scripts
+      - name: Compare released retrieval baseline
+        run: python scripts/compare_release_v020.py --cases examples/release_comparison_diagnostic.json
+      - name: Build production Docker image
+        run: docker build --tag chrono-hybrid-mem:${{ github.sha }} .

@@ -1,0 +1,26 @@
+services:
+  hybrid-memory:
+    build: .
+    image: hybrid-memory:1.0.0
+    container_name: hybrid-memory
+    ports:
+      - "${PORT:-8000}:8000"
+    env_file:
+      - .env
+    environment:
+      MEMORY_STORE_DIR: /app/store
+    volumes:
+      # Persist memories across restarts
+      - ./store:/app/store
+      # Mount local datasets if you want /v1/add/dataset with a container path
+      - ./data:/app/data:ro
+    # Do not probe /health automatically (avoids log noise).
+    healthcheck:
+      disable: true
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+        tag: "{{.Name}}"
+    restart: unless-stopped
