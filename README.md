@@ -45,6 +45,9 @@ python scripts/smoke_check.py http://127.0.0.1:8000   # 端到端冒烟
 参赛流程（详见各 README 与 [09 的完整参赛清单](09-memoryagent/README.md)）：部署到公网 →
 生成密钥 → [提交评测申请](https://agentmemoryleaderboard.ai/evaluation) → Smoke → Full → 复核上榜。
 
+> 📖 **新生请先读 [GETTING_STARTED.md](GETTING_STARTED.md)**：从零环境准备、5 分钟跑通第一个服务、
+> 契约测试讲解、VPS+HTTPS 部署、参赛申请六步、常见问题（国内网络方案），到 5 天学习路线。
+
 ## 契约适配原理
 
 9 个原项目（01–08、10）**本来就实现了完整的 AML Add/Search 语义**（request_id 幂等、
